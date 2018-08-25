@@ -1,5 +1,6 @@
 import numpy as np
 
+from toolz import itertoolz
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.utils import shuffle
 
@@ -18,34 +19,63 @@ class MultitaskNN:
         self.nn_hidden = nn_hidden
         self.batch_size = batch_size
 
-    def fit(self, X, y, max_iter=500):
+    def fit(self, X, X_tar, y, y_tar, max_iter=500, warm_start=False):
         m = X.shape[0]
+        m_tar = X_tar.shape[0]
 
         n_x = X.shape[1]
         n_class = len(set(y))
 
-        # weight and bias initialization
-        self.W1 = np.random.randn(self.nn_hidden, n_x)
-        self.b1 = np.zeros((self.nn_hidden,1))
-        self.W2_1 = np.random.randn(n_class, self.nn_hidden)
-        self.b2_1 = np.zeros((n_class,1))
+        if not warm_start:
+            ''' weight and bias initialization'''
+            # shared weights
+            self.W1 = np.random.randn(self.nn_hidden, n_x)
+            self.b1 = np.zeros((self.nn_hidden,1))
+            
+            # task 1 specific weights
+            self.W2_1 = np.random.randn(n_class, self.nn_hidden)
+            self.b2_1 = np.zeros((n_class,1))
+            
+            # task 2 specific weights
+            self.W2_2 = np.random.randn(n_class, self.nn_hidden)
+            self.b2_2 = np.zeros((n_class,1))
 
         X_shuf, y_shuf = shuffle(X, y)
+        X_tar_shuf, y_tar_shuf = shuffle(X_tar, y_tar)
 
         le = LabelBinarizer()
         le.fit(y)
+        
+        if len(y_tar)>0:
+            le_tar = LabelBinarizer()
+            le_tar.fit(y_tar)
 
         batches_X = np.array_split(X_shuf, m/self.batch_size)
         batches_y = np.array_split(y_shuf, m/self.batch_size)
+        tasks_1 = [1 for i in range(len(batches_y))]
+
+        
+        batches_X_tar = np.array([])
+        batches_y_tar = np.array([])
+        if len(y_tar)>0:
+            batches_X_tar = np.array_split(X_tar_shuf, max(1, m_tar/self.batch_size))
+            batches_y_tar = np.array_split(y_tar_shuf, max(1, m_tar/self.batch_size))
+        tasks_2 = [2 for i in range(len(batches_y_tar))]
+
+        
+        # TO DO: hstack source and target batches in alternating way
+        all_batches_X = list(itertoolz.interleave([batches_X, batches_X_tar]))[::-1]
+        all_batches_y = list(itertoolz.interleave([batches_y, batches_y_tar]))[::-1]
+        all_tasks = list(itertoolz.interleave([tasks_1, tasks_2]))[::-1]
 
 
         for j in range(max_iter):
             batch_errors = []
 
-            for i in range(len(batches_X)):
-                task = 1
-                X_new = batches_X[i].T
-                y_new = batches_y[i]
+            for i in range(len(all_batches_X)):
+                task = all_tasks[i]
+                X_new = all_batches_X[i].T
+                y_new = all_batches_y[i]
                 y_new = le.transform(y_new)
                 y_new = y_new.T
                 Z1 = np.matmul(self.W1, X_new)+self.b1
@@ -68,10 +98,26 @@ class MultitaskNN:
 
                     self.W2_1 = self.W2_1 - self.learning_rate * dW2
                     self.b2_1 = self.b2_1 - self.learning_rate * db2
+                
+                if task == 2:
+                    Z2 = np.matmul(self.W2_2, A1)+self.b2_2
+                    A2 = np.exp(Z2)/np.sum(np.exp(Z2),axis=0)
 
-                # # if task = 1
-                # self.W2 = self.W2 - self.learning_rate * dW2
-                # self.b2 = self.b2 - self.learning_rate * db2
+                    cost = loss(y_new, A2)
+
+                    dZ2 = A2-y_new
+                    dW2 = (1./m) * np.matmul(dZ2, A1.T)
+                    db2 = (1./m) * np.sum(dZ2, axis=1, keepdims=True)
+
+                    dA1 = np.matmul(self.W2_1.T, dZ2)
+                    dZ1 = dA1 * sig(Z1) * (1 - sig(Z1))
+                    dW1 = (1./m) * np.matmul(dZ1, X_new.T)
+                    db1 = (1./m) * np.sum(dZ1, axis=1, keepdims=True)
+
+                    self.W2_2 = self.W2_2 - self.learning_rate * dW2
+                    self.b2_2 = self.b2_2 - self.learning_rate * db2
+
+                
 
                 self.W1 = self.W1 - self.learning_rate * dW1
                 self.b1 = self.b1 - self.learning_rate * db1
@@ -83,15 +129,17 @@ class MultitaskNN:
 
         return self
     
-    def predict_proba(self, X):
-        task = 1
+    def predict_proba(self, X, task):
         Z1 = np.matmul(self.W1, X.T)+self.b1
         A1 = sig(Z1)
 
         if task == 1:
             Z2 = np.matmul(self.W2_1, A1)+self.b2_1
             A2 = np.exp(Z2)/np.sum(np.exp(Z2),axis=0)
+        if task == 2:
+            Z2 = np.matmul(self.W2_2, A1)+self.b2_2
+            A2 = np.exp(Z2)/np.sum(np.exp(Z2),axis=0)
         return A2
     
-    def predict(self, X):
-        return np.argmax(self.predict_proba(X), axis=0)+1
+    def predict(self, X, task):
+        return np.argmax(self.predict_proba(X, task), axis=0)
