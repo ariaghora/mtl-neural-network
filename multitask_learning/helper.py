@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import io
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
 from . import tca
 
 def load_opp_dsads():
@@ -41,6 +42,26 @@ def load_opp_dsads_right_hand():
     y_t = label_dsads
     return X_s, X_t, y_s, y_t
 
+def load_opp_dsads_right_hand_test():
+    opp_mat = io.loadmat('./cross_opp.mat')['data_opp'][:,162:242]
+    label_opp = io.loadmat('./cross_opp.mat')['data_opp'][:,459]
+    dsads_mat = io.loadmat('./cross_dsads.mat')['data_dsads'][:,81:161]
+    label_dsads = io.loadmat('./cross_dsads.mat')['data_dsads'][:,405]
+    
+    opp_mat = StandardScaler().fit_transform(opp_mat)
+    dsads_mat = StandardScaler().fit_transform(dsads_mat)
+    
+    lenc = LabelEncoder()
+    label_opp = lenc.fit_transform(label_opp)
+    label_dsads = lenc.fit_transform(label_dsads)
+    
+    X_s = opp_mat
+    X_t = dsads_mat
+    y_s = label_opp
+    y_t = label_dsads
+    X_t, X_test, y_t, y_test = train_test_split(X_t, y_t, test_size=0.2)
+    return X_s, X_t, y_s, y_t, X_test, y_test
+
 def load_opp_rua_lua():
     rua = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,81:161]
     lua = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,243:323]
@@ -74,6 +95,24 @@ def load_opp_rla_lla():
     y_t = label
     return X_s, X_t, y_s, y_t
 
+def load_opp_rla_lla_test():
+#    [163:243],[325:405]
+    rua = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,162:242]
+    lua = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,324:404]
+    label = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,459]
+    lenc = LabelEncoder()
+    label = lenc.fit_transform(label)
+    
+    rua = StandardScaler().fit_transform(rua)
+    lua = StandardScaler().fit_transform(lua)
+    
+    X_s = rua
+    X_t = lua
+    y_s = label
+    y_t = label
+    X_t, X_test, y_t, y_test = train_test_split(X_t, y_t, test_size=0.2)
+    return X_s, X_t, y_s, y_t, X_test, y_test
+
 def load_dsads_ra_la():
     rua = io.loadmat('./dsads.mat')['data_dsads'][:,81:161]
     lua = io.loadmat('./dsads.mat')['data_dsads'][:,162:242]
@@ -91,6 +130,27 @@ def load_dsads_ra_la():
     y_s = label
     y_t = label
     return X_s, X_t, y_s, y_t
+
+def load_dsads_ra_la_test():
+    rua = io.loadmat('./dsads.mat')['data_dsads'][:,81:161]
+    lua = io.loadmat('./dsads.mat')['data_dsads'][:,162:242]
+    label = io.loadmat('./dsads.mat')['data_dsads'][:,406]
+    used_cols = [2,3,4,5,6,7,9,12,18]
+    idx_used = np.where(np.isin(label, used_cols))
+    rua = rua[idx_used]
+    lua = lua[idx_used]
+    label = label[idx_used]
+    
+    lenc = LabelEncoder()
+    label = lenc.fit_transform(label)
+    rua = StandardScaler().fit_transform(rua)
+    lua = StandardScaler().fit_transform(lua)
+    X_s = rua
+    X_t = lua
+    y_s = label
+    y_t = label
+    X_t, X_test, y_t, y_test = train_test_split(X_t, y_t, test_size=0.2)
+    return X_s, X_t, y_s, y_t, X_test, y_test
 
 def load_dsads_rl_ll():
     rua = io.loadmat('./dsads.mat')['data_dsads'][:,243:323]
