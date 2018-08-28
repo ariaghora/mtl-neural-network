@@ -3,6 +3,9 @@ import numpy as np
 from toolz import itertoolz
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.utils import shuffle
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 
 def sig(z):
     return 1/(1+(np.exp(-z)))
@@ -143,3 +146,81 @@ class MultitaskNN:
     
     def predict(self, X, task):
         return np.argmax(self.predict_proba(X, task), axis=0)
+
+class MultitaskSS:
+    def __init__(self, X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, 
+                 need_expert=True, expert=RandomForestClassifier(n_estimators=64)):
+        self.clf = MultitaskNN()
+        self.X_s = X_s
+        self.y_s = y_s
+        self.X_t = X_t
+        self.X_t_init = X_t_init
+        self.y_t_init = y_t_init
+        self.X_test = X_test
+        self.y_test = y_test
+        self.clf = MultitaskNN(learning_rate=1, nn_hidden=128, batch_size=128)
+        self.need_expert = need_expert
+        self.expert = expert
+        self.prepared = False
+        
+    def prepare(self):
+        # train domain expert classifier
+        self.clf_t = self.expert.fit(self.X_t_init, self.y_t_init)
+        
+        self.clf.fit(self.X_s, self.X_t_init, self.y_s, self.y_t_init, max_iter=1000)
+        self.prepared = True
+        
+        if self.need_expert:
+            proba = self.clf.predict_proba(self.X_t, 1)+0.7*self.clf.predict_proba(self.X_t, 2)+0.9*self.clf_t.predict_proba(self.X_t).T
+        else:
+            proba = self.clf.predict_proba(self.X_t, 1)+0.7*self.clf.predict_proba(self.X_t, 2)
+            
+        self.predictions = np.argmax(proba, axis=0)
+        
+        # check the accuracy on test data (in practice, we are not supposed to know about this acc)
+        if self.need_expert:
+            proba_test = self.clf.predict_proba(self.X_test, 1)+0.7*self.clf.predict_proba(self.X_test, 2)+0.9*self.clf_t.predict_proba(self.X_test).T
+        else:
+            proba_test = self.clf.predict_proba(self.X_test, 1)+0.7*self.clf.predict_proba(self.X_test, 2)
+        predictions_test = np.argmax(proba_test, axis=0)
+        print('Test accuracy: ',accuracy_score(self.y_test, predictions_test))
+        
+        
+        pred = (proba).T
+        self.v = []
+        for i,p in enumerate(pred):
+            conf = np.max(p/sum(p))
+            if conf>0.80:
+                self.v.append(i)
+        print(len(self.v),len(pred))
+        
+    def advance(self, step=1):
+        assert (self.prepared == True), "MultitaskSS has not prepared. Call prepare() beforehand."
+        for i in range(step):
+            sel_X_t = np.vstack([self.X_t_init, self.X_t[self.v, :]])
+            sel_y_t = np.concatenate([self.y_t_init, self.predictions[self.v]])
+            
+            self.clf.fit(self.X_s, sel_X_t, self.y_s, sel_y_t, max_iter=1000, warm_start=True)
+            
+            if self.need_expert:
+                proba = self.clf.predict_proba(self.X_t, 1)+0.7*self.clf.predict_proba(self.X_t, 2)+0.9*self.clf_t.predict_proba(self.X_t).T
+            else:
+                proba = self.clf.predict_proba(self.X_t, 1)+0.7*self.clf.predict_proba(self.X_t, 2)
+            self.predictions = np.argmax(proba, axis=0)
+            
+            # check the accuracy on test data (in practice, we are not supposed to know about this acc)
+            if self.need_expert:
+                proba_test = self.clf.predict_proba(self.X_test, 1)+0.7*self.clf.predict_proba(self.X_test, 2)+0.9*self.clf_t.predict_proba(self.X_test).T
+            else:
+                proba_test = self.clf.predict_proba(self.X_test, 1)+0.7*self.clf.predict_proba(self.X_test, 2)
+            predictions_test = np.argmax(proba_test, axis=0)
+            print('Test accuracy: ',accuracy_score(self.y_test, predictions_test))
+            
+            
+            pred = (proba).T
+            self.v = []
+            for i,p in enumerate(pred):
+                conf = np.max(p/sum(p))
+                if conf>0.80:
+                    self.v.append(i)
+            print(len(self.v),len(pred))
