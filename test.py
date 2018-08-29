@@ -21,14 +21,14 @@ X_s, X_t, y_s, y_t = helper.load_opp_dsads()
 X_s, X_t, y_s, y_t, X_test, y_test = helper.load_opp_rla_lla_test()
 
 # getting n unlabeled data
-n = 3
+n = 5
 X_t, X_t_init, y_t, y_t_init = train_test_split(X_t, y_t, test_size=len(set(y_t))*n, stratify=y_t)
 
 #%% Multitask neural net
 
 multitask_SS = MultitaskSS(X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, need_expert=True)
 multitask_SS.prepare()
-multitask_SS.advance(3)
+multitask_SS.advance(3, relabel=True)
 
 #%% Standard classifier with only target domain data
 

@@ -194,7 +194,7 @@ class MultitaskSS:
                 self.v.append(i)
         print(len(self.v),len(pred))
         
-    def advance(self, step=1):
+    def advance(self, step=1, relabel=True):
         assert (self.prepared == True), "MultitaskSS has not prepared. Call prepare() beforehand."
         for i in range(step):
             sel_X_t = np.vstack([self.X_t_init, self.X_t[self.v, :]])
@@ -218,9 +218,18 @@ class MultitaskSS:
             
             
             pred = (proba).T
-            self.v = []
+            if relabel:
+                self.v = []
+                
+            v_tmp = []
             for i,p in enumerate(pred):
                 conf = np.max(p/sum(p))
                 if conf>0.80:
-                    self.v.append(i)
+#                    self.v.append(i)
+                    v_tmp.append(i)
+            
+            if relabel:
+                self.v = v_tmp
+            else:
+                self.v = list(set(self.v + v_tmp))
             print(len(self.v),len(pred))
