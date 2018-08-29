@@ -3,4 +3,5 @@
 *.xlsx
 *.pptx
 *.tmp
+results.txt
 __pycache__
