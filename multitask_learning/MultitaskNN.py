@@ -7,6 +7,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
+# sigmoid activation function
 def sig(z):
     return 1/(1+(np.exp(-z)))
 
@@ -57,7 +58,6 @@ class MultitaskNN:
         batches_y = np.array_split(y_shuf, m/self.batch_size)
         tasks_1 = [1 for i in range(len(batches_y))]
 
-        
         batches_X_tar = np.array([])
         batches_y_tar = np.array([])
         if len(y_tar)>0:
