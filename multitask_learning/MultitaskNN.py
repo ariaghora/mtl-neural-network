@@ -1,4 +1,5 @@
 import numpy as np
+import progressbar
 
 from toolz import itertoolz
 from sklearn.preprocessing import LabelBinarizer
@@ -6,6 +7,7 @@ from sklearn.utils import shuffle
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+
 
 # sigmoid activation function
 def sig(z):
@@ -72,9 +74,9 @@ class MultitaskNN:
         all_tasks = list(itertoolz.interleave([tasks_1, tasks_2]))[::-1]
 
 
-        for j in range(max_iter):
+        for j in progressbar.progressbar(range(max_iter)):
             batch_errors = []
-
+#            print("Epoch %s, processing minibatches:"%(j+1)
             for i in range(len(all_batches_X)):
                 task = all_tasks[i]
                 X_new = all_batches_X[i].T
@@ -127,8 +129,8 @@ class MultitaskNN:
 
                 batch_errors.append(cost)
 
-            if (j%100==0):
-                print("Batch %s loss: %s"%(j, np.mean(batch_errors)))
+#            if (j%100==0):
+#                print("Batch %s loss: %s"%(j, np.mean(batch_errors)))
 
         return self
     
@@ -149,7 +151,8 @@ class MultitaskNN:
 
 class MultitaskSS:
     def __init__(self, X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, 
-                 need_expert=True, expert=RandomForestClassifier(n_estimators=64)):
+                 need_expert=True, expert=RandomForestClassifier(n_estimators=64),
+                 alpha=0.5, beta=0.8, gamma=0.5):
         self.clf = MultitaskNN()
         self.X_s = X_s
         self.y_s = y_s
@@ -161,27 +164,30 @@ class MultitaskSS:
         self.clf = MultitaskNN(learning_rate=1, nn_hidden=128, batch_size=128)
         self.need_expert = need_expert
         self.expert = expert
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
         self.prepared = False
         
     def prepare(self):
         # train domain expert classifier
+        print("Initial training...")
         self.clf_t = self.expert.fit(self.X_t_init, self.y_t_init)
-        
         self.clf.fit(self.X_s, self.X_t_init, self.y_s, self.y_t_init, max_iter=1000)
         self.prepared = True
         
         if self.need_expert:
-            proba = self.clf.predict_proba(self.X_t, 1)+0.7*self.clf.predict_proba(self.X_t, 2)+0.9*self.clf_t.predict_proba(self.X_t).T
+            proba = self.alpha*self.clf.predict_proba(self.X_t, 1)+self.beta*self.clf.predict_proba(self.X_t, 2)+self.gamma*self.clf_t.predict_proba(self.X_t).T
         else:
-            proba = self.clf.predict_proba(self.X_t, 1)+0.7*self.clf.predict_proba(self.X_t, 2)
+            proba = self.alpha*self.clf.predict_proba(self.X_t, 1)+self.beta*self.clf.predict_proba(self.X_t, 2)
             
         self.predictions = np.argmax(proba, axis=0)
         
         # check the accuracy on test data (in practice, we are not supposed to know about this acc)
         if self.need_expert:
-            proba_test = self.clf.predict_proba(self.X_test, 1)+0.7*self.clf.predict_proba(self.X_test, 2)+0.9*self.clf_t.predict_proba(self.X_test).T
+            proba_test = self.alpha*self.clf.predict_proba(self.X_test, 1)+self.beta*self.clf.predict_proba(self.X_test, 2)+self.gamma*self.clf_t.predict_proba(self.X_test).T
         else:
-            proba_test = self.clf.predict_proba(self.X_test, 1)+0.7*self.clf.predict_proba(self.X_test, 2)
+            proba_test = self.alpha*self.clf.predict_proba(self.X_test, 1)+self.beta*self.clf.predict_proba(self.X_test, 2)
         predictions_test = np.argmax(proba_test, axis=0)
         print('Test accuracy: ',accuracy_score(self.y_test, predictions_test))
         
@@ -197,22 +203,23 @@ class MultitaskSS:
     def advance(self, step=1, relabel=True):
         assert (self.prepared == True), "MultitaskSS has not prepared. Call prepare() beforehand."
         for i in range(step):
+            print("Step %s"%(i+1))
             sel_X_t = np.vstack([self.X_t_init, self.X_t[self.v, :]])
             sel_y_t = np.concatenate([self.y_t_init, self.predictions[self.v]])
             
             self.clf.fit(self.X_s, sel_X_t, self.y_s, sel_y_t, max_iter=1000, warm_start=True)
             
             if self.need_expert:
-                proba = self.clf.predict_proba(self.X_t, 1)+0.7*self.clf.predict_proba(self.X_t, 2)+0.9*self.clf_t.predict_proba(self.X_t).T
+                proba = self.alpha*self.clf.predict_proba(self.X_t, 1)+self.beta*self.clf.predict_proba(self.X_t, 2)+self.gamma*self.clf_t.predict_proba(self.X_t).T
             else:
-                proba = self.clf.predict_proba(self.X_t, 1)+0.7*self.clf.predict_proba(self.X_t, 2)
+                proba = self.alpha*self.clf.predict_proba(self.X_t, 1)+self.beta*self.clf.predict_proba(self.X_t, 2)
             self.predictions = np.argmax(proba, axis=0)
             
             # check the accuracy on test data (in practice, we are not supposed to know about this acc)
             if self.need_expert:
-                proba_test = self.clf.predict_proba(self.X_test, 1)+0.7*self.clf.predict_proba(self.X_test, 2)+0.9*self.clf_t.predict_proba(self.X_test).T
+                proba_test = self.alpha*self.clf.predict_proba(self.X_test, 1)+self.beta*self.clf.predict_proba(self.X_test, 2)+self.gamma*self.clf_t.predict_proba(self.X_test).T
             else:
-                proba_test = self.clf.predict_proba(self.X_test, 1)+0.7*self.clf.predict_proba(self.X_test, 2)
+                proba_test = self.alpha*self.clf.predict_proba(self.X_test, 1)+self.beta*self.clf.predict_proba(self.X_test, 2)
             predictions_test = np.argmax(proba_test, axis=0)
             print('Test accuracy: ',accuracy_score(self.y_test, predictions_test))
             

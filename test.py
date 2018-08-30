@@ -26,7 +26,7 @@ X_t, X_t_init, y_t, y_t_init = train_test_split(X_t, y_t, test_size=len(set(y_t)
 
 #%% Multitask neural net
 
-multitask_SS = MultitaskSS(X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, need_expert=True)
+multitask_SS = MultitaskSS(X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, need_expert=True, alpha=0.8, beta=0.9, gamma=0.6)
 multitask_SS.prepare()
 multitask_SS.advance(3, relabel=True)
 
