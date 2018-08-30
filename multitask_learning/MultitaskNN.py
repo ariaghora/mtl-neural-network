@@ -47,7 +47,9 @@ class MultitaskNN:
             self.b2_2 = np.zeros((n_class,1))
 
         X_shuf, y_shuf = shuffle(X, y)
-        X_tar_shuf, y_tar_shuf = shuffle(X_tar, y_tar)
+        
+        if len(y_tar)>0:
+            X_tar_shuf, y_tar_shuf = shuffle(X_tar, y_tar)
 
         le = LabelBinarizer()
         le.fit(y)
@@ -167,12 +169,17 @@ class MultitaskSS:
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
+        
+        if len(y_t_init) == 0: self.need_expert = False
+        
         self.prepared = False
         
     def prepare(self):
         # train domain expert classifier
         print("Initial training...")
-        self.clf_t = self.expert.fit(self.X_t_init, self.y_t_init)
+        if self.need_expert:
+            self.clf_t = self.expert.fit(self.X_t_init, self.y_t_init)
+            
         self.clf.fit(self.X_s, self.X_t_init, self.y_s, self.y_t_init, max_iter=1000)
         self.prepared = True
         

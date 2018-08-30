@@ -20,10 +20,13 @@ X_s, X_t, y_s, y_t = helper.load_opp_dsads()
 
 X_s, X_t, y_s, y_t, X_test, y_test = helper.load_opp_rla_lla_test()
 
-# getting n unlabeled data
-n = 5
+# getting n labeled data from target domain dataset
+n = 1
 X_t, X_t_init, y_t, y_t_init = train_test_split(X_t, y_t, test_size=len(set(y_t))*n, stratify=y_t)
 
+#%% Uncomment to use no labeled sample from target domain (EXPERIMENTAL)
+#X_t_init = np.array([[]*X_t.shape[1]])
+#y_t_init = []
 #%% Multitask neural net
 
 multitask_SS = MultitaskSS(X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, need_expert=True, alpha=0.8, beta=0.9, gamma=0.6)
