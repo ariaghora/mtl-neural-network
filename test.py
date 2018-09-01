@@ -18,10 +18,10 @@ np.set_printoptions(precision=2, formatter={'float': lambda x: "{0:0.3f}".format
 #%%
 X_s, X_t, y_s, y_t = helper.load_opp_dsads()
 
-X_s, X_t, y_s, y_t, X_test, y_test = helper.load_opp_rla_lla_test()
+X_s, X_t, y_s, y_t, X_test, y_test = helper.load_dsads_ra_la_test()
 
 # getting n labeled data from target domain dataset
-n = 1
+n = 5
 X_t, X_t_init, y_t, y_t_init = train_test_split(X_t, y_t, test_size=len(set(y_t))*n, stratify=y_t)
 
 #%% Uncomment to use no labeled sample from target domain (EXPERIMENTAL)
@@ -29,7 +29,7 @@ X_t, X_t_init, y_t, y_t_init = train_test_split(X_t, y_t, test_size=len(set(y_t)
 #y_t_init = []
 #%% Multitask neural net
 
-multitask_SS = MultitaskSS(X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, need_expert=True, alpha=0.8, beta=0.9, gamma=0.6)
+multitask_SS = MultitaskSS(X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, need_expert=True, alpha=0.9, beta=0.7, gamma=0.9)
 multitask_SS.prepare()
 multitask_SS.advance(3, relabel=True)
 

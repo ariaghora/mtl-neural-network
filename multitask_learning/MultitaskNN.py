@@ -13,6 +13,16 @@ from sklearn.metrics import accuracy_score
 def sig(z):
     return 1/(1+(np.exp(-z)))
 
+def sig_der(z):
+    return sig(z) * (1 - sig(z))
+
+# ReLU activation function
+def relu(z):
+    return z * (z > 0)
+
+def relu_der(z):
+    return 1 * (z > 0)
+
 def loss(y, y_pred):
     l_sum = np.sum(np.multiply(y, np.log(y_pred)))
     m = y.shape[1]
@@ -86,7 +96,7 @@ class MultitaskNN:
                 y_new = le.transform(y_new)
                 y_new = y_new.T
                 Z1 = np.matmul(self.W1, X_new)+self.b1
-                A1 = sig(Z1)
+                A1 = relu(Z1)
 
                 if task == 1:
                     Z2 = np.matmul(self.W2_1, A1)+self.b2_1
@@ -99,7 +109,7 @@ class MultitaskNN:
                     db2 = (1./m) * np.sum(dZ2, axis=1, keepdims=True)
 
                     dA1 = np.matmul(self.W2_1.T, dZ2)
-                    dZ1 = dA1 * sig(Z1) * (1 - sig(Z1))
+                    dZ1 = dA1 * relu_der(Z1) 
                     dW1 = (1./m) * np.matmul(dZ1, X_new.T)
                     db1 = (1./m) * np.sum(dZ1, axis=1, keepdims=True)
 
@@ -117,7 +127,7 @@ class MultitaskNN:
                     db2 = (1./m) * np.sum(dZ2, axis=1, keepdims=True)
 
                     dA1 = np.matmul(self.W2_1.T, dZ2)
-                    dZ1 = dA1 * sig(Z1) * (1 - sig(Z1))
+                    dZ1 = dA1 * relu_der(Z1) 
                     dW1 = (1./m) * np.matmul(dZ1, X_new.T)
                     db1 = (1./m) * np.sum(dZ1, axis=1, keepdims=True)
 
@@ -138,7 +148,7 @@ class MultitaskNN:
     
     def predict_proba(self, X, task):
         Z1 = np.matmul(self.W1, X.T)+self.b1
-        A1 = sig(Z1)
+        A1 = relu(Z1)
 
         if task == 1:
             Z2 = np.matmul(self.W2_1, A1)+self.b2_1
