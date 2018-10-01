@@ -7,6 +7,9 @@ from sklearn.utils import shuffle
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+from sklearn.decomposition import PCA, KernelPCA
+
+import matplotlib.pyplot as plt
 
 
 # sigmoid activation function
@@ -40,7 +43,9 @@ class MultitaskNN:
         m_tar = X_tar.shape[0]
 
         n_x = X.shape[1]
-        n_class = len(set(y))
+        n_class_src = len(set(y))
+        
+        n_class_tar = len(set(y_tar))
 
         if not warm_start:
             ''' weight and bias initialization'''
@@ -49,12 +54,12 @@ class MultitaskNN:
             self.b1 = np.zeros((self.nn_hidden,1))
             
             # task 1 specific weights
-            self.W2_1 = np.random.randn(n_class, self.nn_hidden)
-            self.b2_1 = np.zeros((n_class,1))
+            self.W2_1 = np.random.randn(n_class_src, self.nn_hidden)
+            self.b2_1 = np.zeros((n_class_src,1))
             
             # task 2 specific weights
-            self.W2_2 = np.random.randn(n_class, self.nn_hidden)
-            self.b2_2 = np.zeros((n_class,1))
+            self.W2_2 = np.random.randn(n_class_tar, self.nn_hidden)
+            self.b2_2 = np.zeros((n_class_tar,1))
 
         X_shuf, y_shuf = shuffle(X, y)
         
@@ -86,7 +91,7 @@ class MultitaskNN:
         all_tasks = list(itertoolz.interleave([tasks_1, tasks_2]))[::-1]
 
 
-        for j in progressbar.progressbar(range(max_iter)):
+        for j in range(max_iter):#progressbar.progressbar(range(max_iter)):
             batch_errors = []
 #            print("Epoch %s, processing minibatches:"%(j+1)
             for i in range(len(all_batches_X)):
@@ -118,9 +123,18 @@ class MultitaskNN:
                 
                 if task == 2:
                     Z2 = np.matmul(self.W2_2, A1)+self.b2_2
+                    
+                    # loss combination with expert
+                    #Z2 = np.multiply(Z2, expert.predict_proba(X_new.T).T)
+                    
                     A2 = np.exp(Z2)/np.sum(np.exp(Z2),axis=0)
 
                     cost = loss(y_new, A2)
+
+#                    print(Z2.shape)                    
+#                    print(expert.predict_proba(X_new.T).T)
+#                    print(all_batches_y[i])
+#                    print(accuracy_score(expert.predict(X_new.T), all_batches_y[i]))
 
                     dZ2 = A2-y_new
                     dW2 = (1./m) * np.matmul(dZ2, A1.T)
@@ -141,8 +155,8 @@ class MultitaskNN:
 
                 batch_errors.append(cost)
 
-#            if (j%100==0):
-#                print("Batch %s loss: %s"%(j, np.mean(batch_errors)))
+            if (j%100==0):
+                print("Batch %s loss: %s"%(j, np.mean(batch_errors)))
 
         return self
     
@@ -164,7 +178,8 @@ class MultitaskNN:
 class MultitaskSS:
     def __init__(self, X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, 
                  need_expert=True, expert=RandomForestClassifier(n_estimators=64),
-                 alpha=0.5, beta=0.8, gamma=0.5):
+                 alpha=0.5, beta=0.8, gamma=0.5, with_pca=True, nn_hidden=64,
+                 min_conf=0.9, n_components='all'):
         self.clf = MultitaskNN()
         self.X_s = X_s
         self.y_s = y_s
@@ -173,12 +188,15 @@ class MultitaskSS:
         self.y_t_init = y_t_init
         self.X_test = X_test
         self.y_test = y_test
-        self.clf = MultitaskNN(learning_rate=1, nn_hidden=128, batch_size=128)
+        self.clf = MultitaskNN(learning_rate=1, nn_hidden=nn_hidden, batch_size=128)
         self.need_expert = need_expert
         self.expert = expert
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
+        self.with_pca = with_pca
+        self.min_conf = min_conf
+        self.n_components = n_components
         
         if len(y_t_init) == 0: self.need_expert = False
         
@@ -187,33 +205,51 @@ class MultitaskSS:
     def prepare(self):
         # train domain expert classifier
         print("Initial training...")
+
+        if self.with_pca:        
+            pca = KernelPCA(kernel='rbf', n_components=self.n_components).fit(np.vstack([self.X_s, self.X_t_init]))
+            plt.plot(np.cumsum(pca.lambdas_))
+            plt.show()
+            self.X_s_trans = pca.transform(self.X_s)
+            self.X_t_init_trans = pca.transform(self.X_t_init)
+            self.X_t_trans = pca.transform(self.X_t)
+            self.X_test_trans = pca.transform(self.X_test)
+        else:
+            self.X_s_trans = self.X_s
+            self.X_t_init_trans = self.X_t_init
+            self.X_t_trans = self.X_t
+            self.X_test_trans = self.X_test
+        
         if self.need_expert:
-            self.clf_t = self.expert.fit(self.X_t_init, self.y_t_init)
+            self.clf_t = self.expert.fit(self.X_t_init_trans, self.y_t_init)
+        
+        self.clf.fit(self.X_s_trans, self.X_t_init_trans, self.y_s, self.y_t_init, max_iter=1000)
+        
             
-        self.clf.fit(self.X_s, self.X_t_init, self.y_s, self.y_t_init, max_iter=1000)
+        
         self.prepared = True
         
         if self.need_expert:
-            proba = self.alpha*self.clf.predict_proba(self.X_t, 1)+self.beta*self.clf.predict_proba(self.X_t, 2)+self.gamma*self.clf_t.predict_proba(self.X_t).T
+            proba = self.alpha*self.clf.predict_proba(self.X_t_trans, 1)+self.beta*self.clf.predict_proba(self.X_t_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_t_trans).T
         else:
-            proba = self.alpha*self.clf.predict_proba(self.X_t, 1)+self.beta*self.clf.predict_proba(self.X_t, 2)
+            proba = self.alpha*self.clf.predict_proba(self.X_t_trans, 1)+self.beta*self.clf.predict_proba(self.X_t_trans, 2)
             
         self.predictions = np.argmax(proba, axis=0)
         
         # check the accuracy on test data (in practice, we are not supposed to know about this acc)
         if self.need_expert:
-            proba_test = self.alpha*self.clf.predict_proba(self.X_test, 1)+self.beta*self.clf.predict_proba(self.X_test, 2)+self.gamma*self.clf_t.predict_proba(self.X_test).T
+            proba_test = self.alpha*self.clf.predict_proba(self.X_test_trans, 1)+self.beta*self.clf.predict_proba(self.X_test_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_test_trans).T
         else:
-            proba_test = self.alpha*self.clf.predict_proba(self.X_test, 1)+self.beta*self.clf.predict_proba(self.X_test, 2)
+            proba_test = self.alpha*self.clf.predict_proba(self.X_test_trans, 1)+self.beta*self.clf.predict_proba(self.X_test_trans, 2)
         predictions_test = np.argmax(proba_test, axis=0)
         print('Test accuracy: ',accuracy_score(self.y_test, predictions_test))
         
         
         pred = (proba).T
-        self.v = []
+        self.v = [] # storing indices of instance predicted with high conf
         for i,p in enumerate(pred):
             conf = np.max(p/sum(p))
-            if conf>0.80:
+            if conf>self.min_conf:
                 self.v.append(i)
         print(len(self.v),len(pred))
         
@@ -223,20 +259,37 @@ class MultitaskSS:
             print("Step %s"%(i+1))
             sel_X_t = np.vstack([self.X_t_init, self.X_t[self.v, :]])
             sel_y_t = np.concatenate([self.y_t_init, self.predictions[self.v]])
+
             
-            self.clf.fit(self.X_s, sel_X_t, self.y_s, sel_y_t, max_iter=1000, warm_start=True)
+            if self.with_pca:        
+                pca = KernelPCA(kernel='rbf', n_components=self.n_components).fit(np.vstack([self.X_s, sel_X_t]))
+                plt.plot(np.cumsum(pca.lambdas_))
+                plt.show()
+                self.X_s_trans = pca.transform(self.X_s)
+                sel_X_t_trans = pca.transform(sel_X_t)
+                self.X_t_trans = pca.transform(self.X_t)
+                self.X_test_trans = pca.transform(self.X_test)
+            else:
+                self.X_s_trans = self.X_s
+                sel_X_t_trans = sel_X_t
+                self.X_t_trans = self.X_t
+                self.X_test_trans = self.X_test
+            
+            
+            #X_s_trans_sub, _, y_s_sub, _ = train_test_split(self.X_s_trans, self.y_s, train_size=int(float(len(sel_y_t)*2)))
+            self.clf.fit(self.X_s_trans, sel_X_t_trans, self.y_s, sel_y_t, max_iter=1000, warm_start=True)
             
             if self.need_expert:
-                proba = self.alpha*self.clf.predict_proba(self.X_t, 1)+self.beta*self.clf.predict_proba(self.X_t, 2)+self.gamma*self.clf_t.predict_proba(self.X_t).T
+                proba = self.alpha*self.clf.predict_proba(self.X_t_trans, 1)+self.beta*self.clf.predict_proba(self.X_t_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_t_trans).T
             else:
-                proba = self.alpha*self.clf.predict_proba(self.X_t, 1)+self.beta*self.clf.predict_proba(self.X_t, 2)
+                proba = self.alpha*self.clf.predict_proba(self.X_t_trans, 1)+self.beta*self.clf.predict_proba(self.X_t_trans, 2)    
             self.predictions = np.argmax(proba, axis=0)
             
             # check the accuracy on test data (in practice, we are not supposed to know about this acc)
             if self.need_expert:
-                proba_test = self.alpha*self.clf.predict_proba(self.X_test, 1)+self.beta*self.clf.predict_proba(self.X_test, 2)+self.gamma*self.clf_t.predict_proba(self.X_test).T
+                proba_test = self.alpha*self.clf.predict_proba(self.X_test_trans, 1)+self.beta*self.clf.predict_proba(self.X_test_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_test_trans).T
             else:
-                proba_test = self.alpha*self.clf.predict_proba(self.X_test, 1)+self.beta*self.clf.predict_proba(self.X_test, 2)
+                proba_test = self.alpha*self.clf.predict_proba(self.X_test_trans, 1)+self.beta*self.clf.predict_proba(self.X_test_trans, 2)
             predictions_test = np.argmax(proba_test, axis=0)
             print('Test accuracy: ',accuracy_score(self.y_test, predictions_test))
             
@@ -248,7 +301,7 @@ class MultitaskSS:
             v_tmp = []
             for i,p in enumerate(pred):
                 conf = np.max(p/sum(p))
-                if conf>0.80:
+                if conf>self.min_conf:
 #                    self.v.append(i)
                     v_tmp.append(i)
             

@@ -29,9 +29,11 @@ X_t, X_t_init, y_t, y_t_init = train_test_split(X_t, y_t, test_size=len(set(y_t)
 #y_t_init = []
 #%% Multitask neural net
 
-multitask_SS = MultitaskSS(X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, need_expert=True, alpha=0.9, beta=0.7, gamma=0.9)
+multitask_SS = MultitaskSS(X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, 
+                           need_expert=True, alpha=0.8, beta=1.0, gamma=0.9, 
+                           nn_hidden=20, with_pca=False, min_conf=0.85, n_components=60)
 multitask_SS.prepare()
-multitask_SS.advance(3, relabel=True)
+multitask_SS.advance(5, relabel=True)
 
 #%% Standard classifier with only target domain data
 
@@ -56,7 +58,7 @@ print(accuracy_score(y_test, pred))
 X_s_t = np.vstack([X_s, X_t_init])
 y_s_t = np.concatenate([y_s, y_t_init])
 
-clf_sup = RandomForestClassifier().fit(X_s_t, y_s_t)
+clf_sup = RandomForestClassifier(n_estimators=64).fit(X_s_t, y_s_t)
 pred = clf_sup.predict(X_test)
 print(accuracy_score(y_test, pred))
 
