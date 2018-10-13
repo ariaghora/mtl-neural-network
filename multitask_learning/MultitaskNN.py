@@ -26,14 +26,15 @@ def relu(z):
 def relu_der(z):
     return 1 * (z > 0)
 
-def loss(y, y_pred):
-    l_sum = np.sum(np.multiply(y, np.log(y_pred)))
+def loss(y, y_pred, reg):
+    l_sum = np.sum(np.multiply(y, np.log(y_pred)))#-reg
     m = y.shape[1]
     l = -(1/m)*l_sum
+    
     return l
 
 class MultitaskNN:
-    def __init__(self, nn_hidden=64, learning_rate=0.5, batch_size=64):
+    def __init__(self, nn_hidden=64, learning_rate=0.05, batch_size=64):
         self.learning_rate = learning_rate
         self.nn_hidden = nn_hidden
         self.batch_size = batch_size
@@ -102,12 +103,14 @@ class MultitaskNN:
                 y_new = y_new.T
                 Z1 = np.matmul(self.W1, X_new)+self.b1
                 A1 = relu(Z1)
+                
+                reg = np.linalg.norm(self.W1, ord=2)
 
                 if task == 1:
                     Z2 = np.matmul(self.W2_1, A1)+self.b2_1
                     A2 = np.exp(Z2)/np.sum(np.exp(Z2),axis=0)
 
-                    cost = loss(y_new, A2)
+                    cost = loss(y_new, A2, reg)
 
                     dZ2 = A2-y_new
                     dW2 = (1./m) * np.matmul(dZ2, A1.T)
@@ -129,7 +132,7 @@ class MultitaskNN:
                     
                     A2 = np.exp(Z2)/np.sum(np.exp(Z2),axis=0)
 
-                    cost = loss(y_new, A2)
+                    cost = loss(y_new, A2, reg)
 
 #                    print(Z2.shape)                    
 #                    print(expert.predict_proba(X_new.T).T)
@@ -147,13 +150,14 @@ class MultitaskNN:
 
                     self.W2_2 = self.W2_2 - self.learning_rate * dW2
                     self.b2_2 = self.b2_2 - self.learning_rate * db2
+                    
+                    batch_errors.append(cost)
 
                 
 
                 self.W1 = self.W1 - self.learning_rate * dW1
                 self.b1 = self.b1 - self.learning_rate * db1
 
-                batch_errors.append(cost)
 
             if (j%100==0):
                 print("Batch %s loss: %s"%(j, np.mean(batch_errors)))
