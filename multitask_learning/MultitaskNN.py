@@ -34,7 +34,7 @@ def loss(y, y_pred, reg):
     return l
 
 class MultitaskNN:
-    def __init__(self, nn_hidden=64, learning_rate=0.05, batch_size=64):
+    def __init__(self, nn_hidden=64, learning_rate=0.7, batch_size=64):
         self.learning_rate = learning_rate
         self.nn_hidden = nn_hidden
         self.batch_size = batch_size
@@ -90,11 +90,10 @@ class MultitaskNN:
         all_batches_X = list(itertoolz.interleave([batches_X, batches_X_tar]))[::-1]
         all_batches_y = list(itertoolz.interleave([batches_y, batches_y_tar]))[::-1]
         all_tasks = list(itertoolz.interleave([tasks_1, tasks_2]))[::-1]
-
-
-        for j in range(max_iter):#progressbar.progressbar(range(max_iter)):
+            
+        for j in range(1, max_iter + 1):#progressbar.progressbar(range(max_iter)):
             batch_errors = []
-#            print("Epoch %s, processing minibatches:"%(j+1)
+            
             for i in range(len(all_batches_X)):
                 task = all_tasks[i]
                 X_new = all_batches_X[i].T
@@ -108,7 +107,8 @@ class MultitaskNN:
 
                 if task == 1:
                     Z2 = np.matmul(self.W2_1, A1)+self.b2_1
-                    A2 = np.exp(Z2)/np.sum(np.exp(Z2),axis=0)
+                    
+                    A2 = np.nan_to_num(np.nan_to_num(np.exp(Z2))/np.nan_to_num(np.sum(np.exp(Z2),axis=0)))
 
                     cost = loss(y_new, A2, reg)
 
@@ -120,24 +120,15 @@ class MultitaskNN:
                     dZ1 = dA1 * relu_der(Z1) 
                     dW1 = (1./m) * np.matmul(dZ1, X_new.T)
                     db1 = (1./m) * np.sum(dZ1, axis=1, keepdims=True)
-
+                    
                     self.W2_1 = self.W2_1 - self.learning_rate * dW2
                     self.b2_1 = self.b2_1 - self.learning_rate * db2
                 
                 if task == 2:
                     Z2 = np.matmul(self.W2_2, A1)+self.b2_2
-                    
-                    # loss combination with expert
-                    #Z2 = np.multiply(Z2, expert.predict_proba(X_new.T).T)
-                    
-                    A2 = np.exp(Z2)/np.sum(np.exp(Z2),axis=0)
+                    A2 = np.nan_to_num(np.nan_to_num(np.exp(Z2))/np.nan_to_num(np.sum(np.exp(Z2),axis=0)))
 
                     cost = loss(y_new, A2, reg)
-
-#                    print(Z2.shape)                    
-#                    print(expert.predict_proba(X_new.T).T)
-#                    print(all_batches_y[i])
-#                    print(accuracy_score(expert.predict(X_new.T), all_batches_y[i]))
 
                     dZ2 = A2-y_new
                     dW2 = (1./m) * np.matmul(dZ2, A1.T)
@@ -152,9 +143,7 @@ class MultitaskNN:
                     self.b2_2 = self.b2_2 - self.learning_rate * db2
                     
                     batch_errors.append(cost)
-
                 
-
                 self.W1 = self.W1 - self.learning_rate * dW1
                 self.b1 = self.b1 - self.learning_rate * db1
 
@@ -180,7 +169,7 @@ class MultitaskNN:
         return np.argmax(self.predict_proba(X, task), axis=0)
 
 class MultitaskSS:
-    def __init__(self, X_s, X_t, y_s, X_t_init, y_t_init, X_test, y_test, 
+    def __init__(self, X_s, X_t, y_s, y_t, X_t_init, y_t_init, X_test, y_test, 
                  need_expert=True, expert=RandomForestClassifier(n_estimators=64),
                  alpha=0.5, beta=0.8, gamma=0.5, with_pca=True, nn_hidden=64,
                  min_conf=0.9, n_components='all'):
@@ -188,6 +177,7 @@ class MultitaskSS:
         self.X_s = X_s
         self.y_s = y_s
         self.X_t = X_t
+        self.y_t = y_t
         self.X_t_init = X_t_init
         self.y_t_init = y_t_init
         self.X_test = X_test
@@ -243,11 +233,16 @@ class MultitaskSS:
         # check the accuracy on test data (in practice, we are not supposed to know about this acc)
         if self.need_expert:
             proba_test = self.alpha*self.clf.predict_proba(self.X_test_trans, 1)+self.beta*self.clf.predict_proba(self.X_test_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_test_trans).T
+#            proba_test = self.beta*self.clf.predict_proba(self.X_test_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_test_trans).T
         else:
             proba_test = self.alpha*self.clf.predict_proba(self.X_test_trans, 1)+self.beta*self.clf.predict_proba(self.X_test_trans, 2)
+#            proba_test = self.beta*self.clf.predict_proba(self.X_test_trans, 2)
         predictions_test = np.argmax(proba_test, axis=0)
         print('Test accuracy: ',accuracy_score(self.y_test, predictions_test))
         
+        # transductive preformance
+        yhat = [v.argmax() for v in proba.T]
+        print('Transductive acc: %f'%accuracy_score(yhat, self.y_t))
         
         pred = (proba).T
         self.v = [] # storing indices of instance predicted with high conf
@@ -292,11 +287,16 @@ class MultitaskSS:
             # check the accuracy on test data (in practice, we are not supposed to know about this acc)
             if self.need_expert:
                 proba_test = self.alpha*self.clf.predict_proba(self.X_test_trans, 1)+self.beta*self.clf.predict_proba(self.X_test_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_test_trans).T
+#                proba_test = self.beta*self.clf.predict_proba(self.X_test_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_test_trans).T
             else:
                 proba_test = self.alpha*self.clf.predict_proba(self.X_test_trans, 1)+self.beta*self.clf.predict_proba(self.X_test_trans, 2)
+#                proba_test = self.beta*self.clf.predict_proba(self.X_test_trans, 2)
             predictions_test = np.argmax(proba_test, axis=0)
             print('Test accuracy: ',accuracy_score(self.y_test, predictions_test))
             
+            # transductive preformance
+            yhat = [v.argmax() for v in proba.T]
+            print('Transductive acc: %f\n'%accuracy_score(yhat, self.y_t))
             
             pred = (proba).T
             if relabel:
