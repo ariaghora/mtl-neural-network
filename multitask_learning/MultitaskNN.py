@@ -9,6 +9,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from sklearn.decomposition import PCA, KernelPCA
 
+from libtlda.flda import FeatureLevelDomainAdaptiveClassifier
+from libtlda.suba import SubspaceAlignedClassifier
+
 import matplotlib.pyplot as plt
 
 
@@ -34,7 +37,7 @@ def loss(y, y_pred, reg):
     return l
 
 class MultitaskNN:
-    def __init__(self, nn_hidden=64, learning_rate=0.7, batch_size=64):
+    def __init__(self, nn_hidden=64, learning_rate=0.07, batch_size=64):
         self.learning_rate = learning_rate
         self.nn_hidden = nn_hidden
         self.batch_size = batch_size
@@ -74,8 +77,9 @@ class MultitaskNN:
             le_tar = LabelBinarizer()
             le_tar.fit(y_tar)
 
-        batches_X = np.array_split(X_shuf, m/self.batch_size)
-        batches_y = np.array_split(y_shuf, m/self.batch_size)
+        bs = np.min([self.batch_size, X_shuf.shape[0]])
+        batches_X = np.array_split(X_shuf, m/bs)
+        batches_y = np.array_split(y_shuf, m/bs)
         tasks_1 = [1 for i in range(len(batches_y))]
 
         batches_X_tar = np.array([])
@@ -201,13 +205,19 @@ class MultitaskSS:
         print("Initial training...")
 
         if self.with_pca:        
-            pca = KernelPCA(kernel='rbf', n_components=self.n_components).fit(np.vstack([self.X_s, self.X_t_init]))
-            plt.plot(np.cumsum(pca.lambdas_))
-            plt.show()
-            self.X_s_trans = pca.transform(self.X_s)
-            self.X_t_init_trans = pca.transform(self.X_t_init)
-            self.X_t_trans = pca.transform(self.X_t)
-            self.X_test_trans = pca.transform(self.X_test)
+#            pca = PCA(n_components=self.n_components).fit(np.vstack([self.X_s, self.X_t_init]))            
+#            plt.plot(np.cumsum(pca.singular_values_))
+#            plt.show()
+#            self.X_s_trans = pca.transform(self.X_s)
+#            self.X_t_init_trans = pca.transform(self.X_t_init)
+#            self.X_t_trans = pca.transform(self.X_t)
+#            self.X_test_trans = pca.transform(self.X_test)
+            self.flda = SubspaceAlignedClassifier(num_components=self.n_components)
+            self.flda.fit(self.X_s, self.y_s, self.X_t)
+            self.X_s_trans = self.X_s @ self.flda.CZ
+            self.X_t_init_trans = self.X_t_init @ self.flda.CZ
+            self.X_t_trans = self.X_t @ self.flda.CZ
+            self.X_test_trans = self.X_test @ self.flda.CZ
         else:
             self.X_s_trans = self.X_s
             self.X_t_init_trans = self.X_t_init
@@ -217,7 +227,7 @@ class MultitaskSS:
         if self.need_expert:
             self.clf_t = self.expert.fit(self.X_t_init_trans, self.y_t_init)
         
-        self.clf.fit(self.X_s_trans, self.X_t_init_trans, self.y_s, self.y_t_init, max_iter=1000)
+        self.clf.fit(self.X_s_trans, self.X_t_init_trans, self.y_s, self.y_t_init, max_iter=2000)
         
             
         
@@ -261,27 +271,33 @@ class MultitaskSS:
 
             
             if self.with_pca:        
-                pca = KernelPCA(kernel='rbf', n_components=self.n_components).fit(np.vstack([self.X_s, sel_X_t]))
-                plt.plot(np.cumsum(pca.lambdas_))
-                plt.show()
-                self.X_s_trans = pca.transform(self.X_s)
-                sel_X_t_trans = pca.transform(sel_X_t)
-                self.X_t_trans = pca.transform(self.X_t)
-                self.X_test_trans = pca.transform(self.X_test)
+#                pca = KernelPCA(kernel='rbf', n_components=self.n_components).fit(np.vstack([self.X_s, sel_X_t]))
+#                self.X_s_trans = pca.transform(self.X_s)
+#                sel_X_t_trans = pca.transform(sel_X_t)
+#                self.X_t_trans = pca.transform(self.X_t)
+#                self.X_test_trans = pca.transform(self.X_test)
+#                flda = FeatureLevelDomainAdaptiveClassifier(num_components=self.n_components)
+#                flda.fit(self.X_s, self.X_t)
+                self.X_s_trans = self.X_s @ self.flda.CZ
+                self.X_t_init_trans = self.X_t_init @ self.flda.CZ
+                self.X_t_trans = self.X_t @ self.flda.CZ
+                self.X_test_trans = self.X_test @ self.flda.CZ
+                sel_X_t_trans = sel_X_t @ self.flda.CZ
             else:
                 self.X_s_trans = self.X_s
                 sel_X_t_trans = sel_X_t
                 self.X_t_trans = self.X_t
                 self.X_test_trans = self.X_test
             
-            
-            #X_s_trans_sub, _, y_s_sub, _ = train_test_split(self.X_s_trans, self.y_s, train_size=int(float(len(sel_y_t)*2)))
-            self.clf.fit(self.X_s_trans, sel_X_t_trans, self.y_s, sel_y_t, max_iter=1000, warm_start=True)
+#            print(len(sel_y_t))
+#            X_s_trans_sub, _, y_s_sub, _ = train_test_split(self.X_s_trans, self.y_s, train_size=int(float(len(sel_y_t)))*2)
+            self.clf.fit(self.X_s_trans, sel_X_t_trans, self.y_s, sel_y_t, max_iter=2000, warm_start=True)
             
             if self.need_expert:
                 proba = self.alpha*self.clf.predict_proba(self.X_t_trans, 1)+self.beta*self.clf.predict_proba(self.X_t_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_t_trans).T
             else:
                 proba = self.alpha*self.clf.predict_proba(self.X_t_trans, 1)+self.beta*self.clf.predict_proba(self.X_t_trans, 2)    
+#                proba_test = self.beta*self.clf.predict_proba(self.X_test_trans, 2)+self.gamma*self.clf_t.predict_proba(self.X_test_trans).T
             self.predictions = np.argmax(proba, axis=0)
             
             # check the accuracy on test data (in practice, we are not supposed to know about this acc)
