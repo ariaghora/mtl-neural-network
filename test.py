@@ -44,6 +44,7 @@ multitask_SS.prepare()
 multitask_SS.advance(5, relabel=True)
 
 #%% Standard classifier with only target domain data
+np.random.seed(1)
 
 clf_rf = RandomForestClassifier().fit(X_t_init, y_t_init)
 pred = clf_rf.predict(X_test)
@@ -67,6 +68,8 @@ print(accuracy_score(y_test, pred))
 
 
 #%% Standard classifier with target domain data combined with source domain data
+
+np.random.seed(1)
 X_s_t = np.vstack([X_s, X_t_init])
 y_s_t = np.concatenate([y_s, y_t_init])
 

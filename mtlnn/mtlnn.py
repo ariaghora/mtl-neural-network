@@ -45,6 +45,48 @@ def loss(y, y_pred):
 def fast_mul(A, B):
     return A @ B
 
+class Task:
+    def __init__(self, nn_hidden, n_classes, learning_rate, m, T):
+        self.W = np.random.randn(n_classes, nn_hidden)
+        self.b = np.zeros((n_classes, 1))
+        self.learning_rate = learning_rate
+        self.T = T
+        self.m = m
+        
+        self.batch_errors = []
+        
+    def evaluate(self, shared_layer_activation):
+        A = shared_layer_activation
+        self.Z2 = fast_mul(self.W, A) + self.b
+        self.A2 = np.nan_to_num(np.nan_to_num(np.exp(self.Z2/self.T))/np.nan_to_num(np.sum(np.exp(self.Z2/self.T),axis=0)))
+
+        
+        return(self.A2)
+
+    def backpropagate(self, y, shared_layer_activation, shared_layer_evaluation):
+        cost = loss(y, self.A2)
+        self.batch_errors.append(cost)
+        
+        A = shared_layer_activation
+        Z1 = shared_layer_evaluation
+        
+        
+        dZ2 = self.A2-y                    
+        dW2 = (1./self.m) * fast_mul(dZ2, A.T)
+        db2 = (1./self.m) * np.sum(dZ2, axis=1, keepdims=True)
+
+        
+        dA1 = fast_mul(self.W2_1.T, dZ2)
+        dZ1 = dA1 * relu_der(Z1) 
+        
+        dW1 = (1./self.m) * fast_mul(dZ1, X_new.T)
+        db1 = (1./self.m) * np.sum(dZ1, axis=1, keepdims=True)
+        
+        self.W2_1 = self.W2_1 - self.learning_rate * dW2
+        self.b2_1 = self.b2_1 - self.learning_rate * db2
+        
+        
+
 class MultitaskNN:
     def __init__(self, nn_hidden=64, learning_rate=0.07, batch_size=200, T=1.5, 
                  dropout_percent=0.4):
