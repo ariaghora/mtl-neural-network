@@ -13,6 +13,8 @@ from sklearn.decomposition import PCA, KernelPCA
 from libtlda.flda import FeatureLevelDomainAdaptiveClassifier
 from libtlda.suba import SubspaceAlignedClassifier
 
+from tqdm import tqdm
+
 from numba import jit
 
 
@@ -44,11 +46,13 @@ def fast_mul(A, B):
     return A @ B
 
 class MultitaskNN:
-    def __init__(self, nn_hidden=64, learning_rate=0.07, batch_size=64, T=1.5):
+    def __init__(self, nn_hidden=64, learning_rate=0.07, batch_size=200, T=1.5, 
+                 dropout_percent=0.4):
         self.learning_rate = learning_rate
         self.nn_hidden = nn_hidden
         self.batch_size = batch_size
         self.T = T
+        self.dropout_percent=dropout_percent
 
     def fit(self, X, X_tar, y, y_tar, max_iter=500, warm_start=False, use_dropout=False):
         m = X.shape[0]
@@ -109,7 +113,7 @@ class MultitaskNN:
         
         loss_src = []
         loss_tar = []
-        for j in range(1, max_iter + 1):#progressbar.progressbar(range(max_iter)):
+        for j in tqdm(range(1, max_iter + 1)):#progressbar.progressbar(range(max_iter)):
             batch_errors_tar = []
             batch_errors_src = []
             
@@ -123,8 +127,7 @@ class MultitaskNN:
                 A1 = relu(Z1)
                 
                 if use_dropout:
-                    dropout_percent = 0.2
-                    A1 *= np.random.binomial([np.ones((len(Z1), A1.shape[1]))],1-dropout_percent)[0] * (1.0/(1-dropout_percent))
+                    A1 *= np.random.binomial([np.ones((len(Z1), A1.shape[1]))],1-self.dropout_percent)[0] * (1.0/(1-self.dropout_percent))
 
                 if task == 1:
                     Z2 = fast_mul(self.W2_1, A1)+self.b2_1
@@ -176,9 +179,9 @@ class MultitaskNN:
 
             loss_src.append(np.mean(batch_errors_src))
             loss_tar.append(np.mean(batch_errors_tar))
-            if (j%100==0):
-                print("Target %s loss: %s"%(j, np.mean(batch_errors_tar)))
-                print("Source %s loss: %s"%(j, np.mean(batch_errors_src)))
+            # if (j%100==0):
+            #     print("Target %s loss: %s"%(j, np.mean(batch_errors_tar)))
+            #     print("Source %s loss: %s"%(j, np.mean(batch_errors_src)))
             
         end = time.time()
         print(end-start)
@@ -204,3 +207,140 @@ class MultitaskNN:
     
     def predict(self, X, task):
         return np.argmax(self.predict_proba(X, task), axis=0)
+    
+class MTT:
+    def __init__(self, X_s_ori, y_s, X_t_ori, y_t, nn_hidden=30, learning_rate=0.01, 
+                 batch_size=200, T=2, seed=1, alpha=0.7, dropout_percent=0.4, min_confidence=0.95, 
+                 max_iter=10000, num_components=40):
+        self.X_s_ori = X_s_ori
+        self.X_t_ori = X_t_ori
+        self.model = MultitaskNN(nn_hidden=nn_hidden, learning_rate=learning_rate, 
+                                 batch_size=batch_size, T=T, dropout_percent=dropout_percent)
+        
+        self.alpha = alpha
+        self.min_confidence = min_confidence
+        self.max_iter = max_iter
+        self.num_components = num_components
+        
+        self.y_s = y_s
+        self.y_t = y_t
+        
+        self.seed = seed
+        self.trained = False
+    
+    def prepare(self, initial_target_labels=False, X_t_init=[], y_t_init=[]):
+        print('Pass 1')
+        np.random.seed(self.seed)
+        
+        suba = SubspaceAlignedClassifier()
+        if not initial_target_labels:
+            self.X_t_init = np.empty([0, self.X_t.shape[1]])
+            self.y_t_init = np.array([])
+            V, CX, self.CZ = suba.subspace_alignment(self.X_s_ori, self.X_t_ori, 
+                                                num_components=self.num_components)
+        else:
+            assert X_t_init.shape[0]>0, 'Initial target data must not be empty'
+            self.X_t_init = X_t_init
+            self.y_t_init = y_t_init
+            V, CX, self.CZ = suba.subspace_alignment(self.X_s_ori, np.vstack([X_t_init, self.X_t_ori]),
+                                                num_components=self.num_components)
+            
+        V, CX, CZ = suba.subspace_alignment(self.X_s_ori, self.X_t_ori, 
+                                            num_components=self.num_components)
+        self.X_s = self.X_s_ori @ CX # map to principal component
+        self.X_s = self.X_s @ V # align to subspace
+        self.X_t = self.X_t_ori @ CZ
+        
+        if initial_target_labels:
+            self.X_t_init = self.X_t_init @ CZ
+            
+        self.model.fit(self.X_s, self.X_t_init, self.y_s, self.y_t_init, 
+                       warm_start=False, max_iter=self.max_iter, use_dropout=True)
+        
+        ## TRANSDUCTION THROUGH SOURCE-SPECIFIC NET
+        pred_proba_f = self.model.predict_proba(self.X_t, 1).T
+        pred_proba = (pred_proba_f)
+        
+        # max confidence of prediction on each instance
+        proba_max = pred_proba.max(axis=1)
+        
+        idx_gt_threshold = np.where(proba_max > self.min_confidence)
+        proba_gt_threshold = proba_max[idx_gt_threshold]
+        
+        self.initial_selected_num = len(proba_gt_threshold)
+        print('selected: ', self.initial_selected_num)
+        
+        # Evaluate 1st phase transduction
+        pred = (pred_proba_f).argmax(axis=1)
+        acc = accuracy_score(pred, self.y_t)
+        print('trans acc:', acc)
+        acc_sel = accuracy_score(pred[idx_gt_threshold], self.y_t[idx_gt_threshold])
+        print('trans sel acc:', acc_sel)
+        
+        # Select label with high confidence
+        self.X_trans = np.vstack([self.X_t_init, self.X_t[idx_gt_threshold]])
+        self.y_trans = np.concatenate([self.y_t_init, pred[idx_gt_threshold]])
+        
+        self.trained = True
+    
+    def advance(self, step=1):
+        assert self.trained == True, "prepare() function has not been called"
+        np.random.seed(self.seed)
+        
+        trans_accs = []
+        sel_instances = []
+        for i in range(step):
+            print('Step ',i+1)
+            self.model.fit(self.X_s, self.X_trans, self.y_s, self.y_trans, warm_start=True, max_iter=self.max_iter, use_dropout=True)
+            
+            alpha = self.alpha
+            beta = 1 - alpha
+            
+            pred_proba_f = self.model.predict_proba(self.X_t, 2).T
+            pred_proba_g = self.model.predict_proba(self.X_t, 1).T
+            pred_proba = (alpha*pred_proba_f + beta * pred_proba_g)
+            
+            # max confidence of prediction on each instance
+            proba_max = pred_proba.max(axis=1)
+            idx_gt_threshold = np.where(proba_max > self.min_confidence)
+            proba_gt_threshold = proba_max[idx_gt_threshold]
+            
+            # Evaluate 1st phase transduction
+            pred = (alpha*pred_proba_f + beta*pred_proba_g).argmax(axis=1)
+            acc = accuracy_score(pred, self.y_t)
+            acc_sel = accuracy_score(pred[idx_gt_threshold], self.y_t[idx_gt_threshold])
+            
+            print('selected: ', len(proba_gt_threshold))
+            print('trans acc:', acc)
+            print('trans sel acc:', acc_sel)
+            
+            trans_accs.append(acc)
+            sel_instances.append(len(proba_gt_threshold))
+    
+            # Select label with high confidence
+            self.X_trans = self.X_t[idx_gt_threshold]#np.vstack([X_t_init, X_t[idx_gt_threshold]])
+            self.y_trans = pred[idx_gt_threshold]
+        
+        plt.figure()
+        plt.plot(trans_accs, label='transduction accuracy')
+        plt.legend()
+        plt.show()
+        
+        plt.figure()
+        plt.plot([self.initial_selected_num]+sel_instances[:-1], label='selected instances')
+        plt.legend()
+        plt.show()
+    
+    def predict(self, X):
+        alpha = self.alpha
+        beta = 1 - alpha
+            
+        X_t = X @ self.CZ
+        
+        pred_proba_f = self.model.predict_proba(X_t, 2).T
+        pred_proba_g = self.model.predict_proba(X_t, 1).T
+        pred = (alpha*pred_proba_f + beta*pred_proba_g).argmax(axis=1)
+        return pred
+    
+        
+        

@@ -1,8 +1,11 @@
 import numpy as np
 from scipy import io
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import LabelEncoder, StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split
 from . import tca
+
+def tanh_scale(X):
+    return 0.5*(np.tanh(0.01 * (X - np.mean(X, axis=0)) / np.std(X, axis=0)) + 1)
 
 def load_opp_dsads():
     opp_mat = io.loadmat('./cross_opp.mat')['data_opp'][:,0:80]
@@ -48,8 +51,8 @@ def load_pamap_opp():
     opp_mat = io.loadmat('./cross_opp.mat')['data_opp'][:,0:80]
     label_opp = io.loadmat('./cross_opp.mat')['data_opp'][:,459]
     
-    pamap_mat = StandardScaler().fit_transform(pamap_mat)
-    opp_mat = StandardScaler().fit_transform(opp_mat)
+    # pamap_mat = MinMaxScaler().fit_transform(pamap_mat)
+    # opp_mat = MinMaxScaler().fit_transform(opp_mat)
     
     
     lenc = LabelEncoder()
@@ -210,6 +213,73 @@ def load_dsads_rl_ll():
     y_t = label
     return X_s, X_t, y_s, y_t
 
+def load_dsads_ra_t():
+    rua = io.loadmat('./dsads.mat')['data_dsads'][:,81:161]
+    lua = io.loadmat('./dsads.mat')['data_dsads'][:,0:80]
+    label = io.loadmat('./dsads.mat')['data_dsads'][:,406]
+    used_cols = [2,3,4,5,6,7,9,12,18]
+    idx_used = np.where(np.isin(label, used_cols))
+    rua = rua[idx_used]
+    lua = lua[idx_used]
+    label = label[idx_used]
+    
+    lenc = LabelEncoder()
+    label = lenc.fit_transform(label)
+    rua = StandardScaler().fit_transform(rua)
+    lua = StandardScaler().fit_transform(lua)
+    X_s = rua
+    X_t = lua
+    y_s = label
+    y_t = label
+    return X_s, X_t, y_s, y_t
+
+def load_pamap_h_c():
+    rua = io.loadmat('./pamap.mat')['data_pamap'][:,0:80]
+    lua = io.loadmat('./pamap.mat')['data_pamap'][:,81:161]
+    label = io.loadmat('./pamap.mat')['data_pamap'][:,243]
+    
+    lenc = LabelEncoder()
+    label = lenc.fit_transform(label)
+    rua = StandardScaler().fit_transform(rua)
+    lua = StandardScaler().fit_transform(lua)
+    X_s = rua
+    X_t = lua
+    y_s = label
+    y_t = label
+    return X_s, X_t, y_s, y_t
+
+def load_opp_rla_t():
+    rua = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,162:242]
+    lua = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,0:80]
+    label = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,459]
+    lenc = LabelEncoder()
+    label = lenc.fit_transform(label)
+    
+    rua = StandardScaler().fit_transform(rua)
+    lua = StandardScaler().fit_transform(lua)
+    
+    X_s = rua
+    X_t = lua
+    y_s = label
+    y_t = label
+    return X_s, X_t, y_s, y_t
+
+def load_opp_rua_t():
+    rua = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,81:161]
+    lua = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,0:80]
+    label = io.loadmat('./opp_loco.mat')['data_opp_loco'][:,459]
+    lenc = LabelEncoder()
+    label = lenc.fit_transform(label)
+    
+    rua = StandardScaler().fit_transform(rua)
+    lua = StandardScaler().fit_transform(lua)
+    
+    X_s = rua
+    X_t = lua
+    y_s = label
+    y_t = label
+    return X_s, X_t, y_s, y_t
+
 #%%
 def load_c_a():
     c = io.loadmat('./datasets/zscore/Caltech10_zscore_SURF_L10.mat')
@@ -220,8 +290,8 @@ def load_c_a():
     X_t = a['Xt']
     y_t = a['Yt']
     
-    X_s = StandardScaler().fit_transform(X_s)
-    X_t = StandardScaler().fit_transform(X_t)
+    X_s = MinMaxScaler().fit_transform(X_s)
+    X_t = MinMaxScaler().fit_transform(X_t)
     y_s = y_s.reshape(1, len(y_s))[0]
     y_t = y_t.reshape(1, len(y_t))[0]
     
@@ -240,8 +310,8 @@ def load_c_w():
     X_t = w['Xt']
     y_t = w['Yt']
     
-    X_s = StandardScaler().fit_transform(X_s)
-    X_t = StandardScaler().fit_transform(X_t)
+    X_s = MinMaxScaler().fit_transform(X_s)
+    X_t = MinMaxScaler().fit_transform(X_t)
     y_s = y_s.reshape(1, len(y_s))[0]
     y_t = y_t.reshape(1, len(y_t))[0]
     
@@ -259,8 +329,8 @@ def load_c_d():
     X_t = d['Xs']
     y_t = d['Ys']
     
-    X_s = StandardScaler().fit_transform(X_s)
-    X_t = StandardScaler().fit_transform(X_t)
+    X_s = MinMaxScaler().fit_transform(X_s)
+    X_t = MinMaxScaler().fit_transform(X_t)
     y_s = y_s.reshape(1, len(y_s))[0]
     y_t = y_t.reshape(1, len(y_t))[0]
     
@@ -280,6 +350,29 @@ def load_c_w_sub():
 def load_a_c():
     (X_s, X_t, y_s, y_t) = load_c_a()
     return (X_t, X_s, y_t, y_s)
+
+def load_a_w():
+    (X_s, _, y_s, _) = load_a_c()
+    (_, X_t, _, y_t) = load_c_w()
+    return (X_s, X_t, y_s, y_t)
+
+def load_a_d():
+    (X_s, _, y_s, _) = load_a_c()
+    (_, X_t, _, y_t) = load_c_d()
+    return (X_s, X_t, y_s, y_t)
+
+def load_w_c():
+    (X_s, X_t, y_s, y_t) = load_c_w()
+    return (X_t, X_s, y_t, y_s)
+
+def load_w_a():
+    (X_s, X_t, y_s, y_t) = load_a_w()
+    return (X_t, X_s, y_t, y_s)
+
+def load_w_d():
+    (X_s, _, y_s, _) = load_w_a()
+    (_, X_t, _, y_t) = load_a_d()
+    return (X_s, X_t, y_s, y_t)
 
 #%%
 
