@@ -4,6 +4,7 @@ from __future__ import print_function
 import autograd.numpy as np
 import time
 import matplotlib.pyplot as plt
+import math
 
 from toolz import itertoolz
 from sklearn.preprocessing import LabelBinarizer
@@ -123,7 +124,7 @@ class MultitaskNN:
         self.dropout_percent=dropout_percent
         self.verbosity = verbosity
     
-    def fit2(self, X, X_tar, y, y_tar, max_iter=500, warm_start=False, 
+    def fit(self, X, X_tar, y, y_tar, max_iter=500, warm_start=False, 
             use_dropout=False, desc='', regularize=True):
         m = X.shape[0]
         n_x = X.shape[1]
@@ -181,172 +182,83 @@ class MultitaskNN:
         
         def get_batch(step):
             idx = step % len(all_tasks)
+            task = all_tasks[idx]
             X_new = all_batches_X[idx].T
             y_new = all_batches_y[idx]
             y_new = le.transform(y_new)
             y_new = y_new.T
-            return X_new, y_new
+            return X_new, y_new, task
+        
+        def batch_normalize(W):
+            mu = np.mean(W, axis=0)
+            var = np.var(W, axis=0)
+            W = (W - mu)/np.sqrt(var+1)
+            return W
+        
+        def bhattacharyya(a, b):
+            """ Bhattacharyya distance between distributions (lists of floats). """
+            if not len(a) == len(b):
+                raise ValueError("a and b must be of the same size")
+            return -np.log(sum((np.sqrt(u * w) for u, w in zip(a, b))))
+
         
         def model_loss(params, step):
             W, b1, W2_1, b2_1, W2_2, b2_2 = params
-            prod = W @ get_batch(step)
-            nonlin = relu(prod)+b1
+            
+            W_norm = W#batch_normalize(W)
+            # W2_1 = batch_normalize(W2_1)
+            # W2_2 = batch_normalize(W2_2)
+            
+            X, y, task = get_batch(step)
+            prod = W_norm @ X + b1
+            nonlin = relu(prod)
             if use_dropout:
                 nonlin *= np.random.binomial([np.ones((len(prod), nonlin.shape[1]))],
                                               1-self.dropout_percent)[0] * (1.0/(1-self.dropout_percent))
-            out = (W2 @ nonlin)+b2
+            
+            if task==1:
+                out = (W2_1 @ nonlin)+b2_1
+            else:
+                out = (W2_2 @ nonlin)+b2_2
+                
             prob = np.exp(out/self.T)/np.sum(np.exp(out/self.T))
+            L = loss(y, prob)
             
-            # if regularize:
-            #     a_bar = (flatten(self.task_1.W)[0]+flatten(self.task_2.W)[0])/2
-            #     a_bar_norm = np.linalg.norm(a_bar, 2)
-            #     source_norm = np.linalg.norm(flatten(self.task_1.W)[0]-a_bar, 2)
-            #     tar_norm = np.linalg.norm(flatten(self.task_2.W)[0]-a_bar, 2)
+            # task relatedness
+            if regularize:
+                a_bar = (flatten(self.task_1.W)[0]+flatten(self.task_2.W)[0])/2
+                a_bar_norm = np.linalg.norm(a_bar, 2)
+                source_norm = np.linalg.norm(flatten(self.task_1.W)[0]-a_bar, 2)
+                tar_norm = np.linalg.norm(flatten(self.task_2.W)[0]-a_bar, 2)
                 
-            #     reg = a_bar_norm + 0.7 * (source_norm+tar_norm)/2
-            # else:
-            #     reg = 0
-            
-            cost = loss(y_new, prob)+0.3*reg
-            return cost
-    
-    def fit(self, X, X_tar, y, y_tar, max_iter=500, warm_start=False, 
-            use_dropout=False, desc='', regularize=True):
-        m = X.shape[0]
-        n_x = X.shape[1]
-        
-        print(n_x)
-        
-        n_class_src = len(set(y))
-        if len(set(y_tar)) > 0:
-            n_class_tar = len(set(y_tar))
-            m_tar = X_tar.shape[0]
-
-
-        if not warm_start:
-            ''' weight and bias initialization'''
-            # shared weights
-            self.W1 = np.random.randn(self.nn_hidden, n_x)
-            self.b1 = np.zeros((self.nn_hidden,1))
-            
-            # task 1 (source) specific weights
-            self.task_1 = Task(self.nn_hidden, n_class_src, self.learning_rate, m, self.T)
-            
-            # task 2 (target) specific weights
-            self.task_2 = Task(self.nn_hidden, n_class_src, self.learning_rate, m, self.T)
-
-        X_shuf, y_shuf = shuffle(X, y)
-        
-        if len(y_tar)>0:
-            X_tar_shuf, y_tar_shuf = shuffle(X_tar, y_tar)
-
-        # transform labels into one-hot vectors
-        le = LabelBinarizer()
-        le.fit(list(y)+list(y_tar))
-        
-        if len(y_tar)>0:
-            le_tar = LabelBinarizer()
-            le_tar.fit(y_tar)
-
-        bs = np.min([self.batch_size, X_shuf.shape[0]])
-        batches_X = np.array_split(X_shuf, m/bs)
-        batches_y = np.array_split(y_shuf, m/bs)
-        tasks_1 = [1 for i in range(len(batches_y))]
-
-        batches_X_tar = np.array([])
-        batches_y_tar = np.array([])
-        if len(y_tar)>0:
-            batches_X_tar = np.array_split(X_tar_shuf, max(1, m_tar/self.batch_size))
-            batches_y_tar = np.array_split(y_tar_shuf, max(1, m_tar/self.batch_size))
-        tasks_2 = [2 for i in range(len(batches_y_tar))]
-
-        
-        # TO DO: hstack source and target batches in alternating way
-        all_batches_X = list(itertoolz.interleave([batches_X, batches_X_tar]))[::-1]
-        all_batches_y = list(itertoolz.interleave([batches_y, batches_y_tar]))[::-1]
-        all_tasks = list(itertoolz.interleave([tasks_1, tasks_2]))[::-1]
-        
-        start = time.time()
-        
-        loss_src = []
-        loss_tar = []
-        
-        progress_bar = tqdm_notebook if in_ipynb() else tqdm
-        for j in progress_bar(range(1, max_iter + 1), desc=desc):#progressbar.progressbar(range(max_iter)):
-            batch_errors_tar = []
-            batch_errors_src = []
-            for i in (range(len(all_batches_X))):
-                task = all_tasks[i]
-                X_new = all_batches_X[i].T
-                y_new = all_batches_y[i]
-                y_new = le.transform(y_new)
-                y_new = y_new.T
+                reg = a_bar_norm + 0.1 * (source_norm+tar_norm)/2
+            else:
+                reg = 0
                 
-                def model_loss(params, _):
-                    W, b1, W2, b2 = params
-                    prod = W@X_new
-                    nonlin = relu(prod)+b1
-                    if use_dropout:
-                        nonlin *= np.random.binomial([np.ones((len(prod), nonlin.shape[1]))],
-                                                      1-self.dropout_percent)[0] * (1.0/(1-self.dropout_percent))
-                    out = (W2 @ nonlin)+b2
-                    prob = np.exp(out/self.T)/np.sum(np.exp(out/self.T))
-                    
-                    if regularize:
-                        a_bar = (flatten(self.task_1.W)[0]+flatten(self.task_2.W)[0])/2
-                        a_bar_norm = np.linalg.norm(a_bar, 2)
-                        source_norm = np.linalg.norm(flatten(self.task_1.W)[0]-a_bar, 2)
-                        tar_norm = np.linalg.norm(flatten(self.task_2.W)[0]-a_bar, 2)
-                        
-                        reg = a_bar_norm + 0.7 * (source_norm+tar_norm)/2
-                    else:
-                        reg = 0
-                    
-                    cost = loss(y_new, prob)+0.3*reg
-                    return cost
-                
-                if task==1:
-                    cost = model_loss((self.W1, self.b1, self.task_1.W, self.task_1.b))
-                    self.dW1, self.db1, self.task_1.dW, self.task_1.db = grad(model_loss)((self.W1, self.b1, self.task_1.W, self.task_1.b))
-                    
-                    self.W1 -= self.learning_rate * self.dW1
-                    self.b1 -= self.learning_rate * self.db1
-                    self.task_1.W -= self.task_1.dW
-                    self.task_1.b -= self.task_1.db
-                    
-                    batch_errors_src.append(cost)
+            # bhattacharya penalty
+            P_s_prime = relu(((W_norm@X_shuf.T)+b1)).T.mean(axis=0)
+            P_t_prime = relu(((W_norm@X_tar_shuf.T)+b1)).T.mean(axis=0)
+            P_s = P_s_prime/(np.sum(P_s_prime))
+            P_t = P_t_prime/(np.sum(P_t_prime))
+            m = np.multiply(P_s, P_t)
+            bt_distance = -(np.log(np.sum(P_s*P_t)))
 
-                
-                if task==2:
-                    cost = model_loss((self.W1, self.b1, self.task_2.W, self.task_2.b))
-                    self.dW1, self.db1, self.task_2.dW, self.task_2.db = grad(model_loss)((self.W1, self.b1, self.task_2.W, self.task_2.b))
-                    
-                    self.W1 -= self.learning_rate * self.dW1
-                    self.b1 -= self.learning_rate * self.db1
-                    self.task_2.W -= self.task_2.dW
-                    self.task_2.b -= self.task_2.db
-                    
-                    batch_errors_tar.append(cost)
-                
-                # batch normalize
-                mu = np.mean(self.W1, axis=0)
-                var = np.var(self.W1, axis=0)
-                self.W1 = (self.W1 - mu)/np.sqrt(var+1e-8)
-
-
-            loss_src.append(np.mean(batch_errors_src))
-            loss_tar.append(np.mean(batch_errors_tar))
-            
-        end = time.time()
-        # print(end-start)
+            return L + 0.3*bt_distance#+ 0.3 * reg
         
-        if self.verbosity > 2:
-            plt.figure()
-            plt.plot(loss_src, label='source')
-            plt.plot(loss_tar, label='target')
-            plt.legend()
-            plt.show()
-            return self
+        params = [self.W1, self.b1, self.task_1.W, self.task_1.b, 
+                  self.task_2.W, self.task_2.b]
+        
+        model_loss_grad = grad(model_loss)
+        
+        max_epoch = 500
+        def callback(params, step, g):
+            if step % max_epoch == 0:
+                print("Iteration {0:3d} objective {1:1.2e}; task {2}".format(step//max_epoch + 1, model_loss(params, step), '-'))
+        
+        self.W1, self.b1, self.task_1.W, self.task_1.b, self.task_2.W, self.task_2.b = adam(model_loss_grad, params,
+                                                                                            step_size=self.learning_rate, num_iters=30*max_epoch,
+                                                                                            callback=callback)
+        return self
     
     def predict_proba(self, X, task):
         Z1 = np.matmul(self.W1, X.T)+self.b1
@@ -405,9 +317,6 @@ class MTT:
             if self.domain_adaptation:
                 V, CX, self.CZ = suba.subspace_alignment(self.X_s_ori, np.vstack([X_t_init, self.X_t_ori]),
                                                     num_components=self.num_components)
-            
-        # V, CX, CZ = suba.subspace_alignment(self.X_s_ori, self.X_t_ori, 
-        #                                     num_components=self.num_components)
         
         if self.domain_adaptation:
             self.X_s = self.X_s_ori @ CX # map to principal component
@@ -426,7 +335,7 @@ class MTT:
             
         self.model.fit(self.X_s, self.X_t_init, self.y_s, self.y_t_init, 
                        warm_start=False, max_iter=self.max_iter, use_dropout=True,
-                       desc='Preparing', regularize=False)
+                       desc='Preparing', regularize=True)
         
         ## TRANSDUCTION THROUGH SOURCE-SPECIFIC NET
         pred_proba_f = self.model.predict_proba(self.X_t, 1).T
@@ -530,8 +439,8 @@ class MTT:
                 self.X_t = self.X_t[exclude]
                 print(self.X_t.shape[0])
             
-            self.X_out = self.X_s_ori[idx_gt_threshold_sec]
-            self.y_out = self.pred[idx_gt_threshold_sec]
+            # self.X_out = self.X_s_ori[idx_gt_threshold_sec]
+            # self.y_out = self.pred[idx_gt_threshold_sec]
         
         if self.verbosity > 2:
             plt.figure()
