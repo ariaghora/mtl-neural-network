@@ -29,7 +29,7 @@ np.set_printoptions(precision=2, formatter={'float': lambda x: "{0:0.3f}".format
 X_s, X_t, y_s, y_t, X_test, y_test = helper.load_dsads_ra_la_test()
 
 # getting n labeled data from target domain dataset
-n = 3
+n = 5
 X_t, X_t_init, y_t, y_t_init = train_test_split(X_t, y_t, test_size=len(set(y_t))*n, stratify=y_t)
 
 #%% Uncomment to use no labeled sample from target domain (EXPERIMENTAL)
